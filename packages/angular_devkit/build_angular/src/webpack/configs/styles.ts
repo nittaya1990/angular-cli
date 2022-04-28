@@ -7,11 +7,11 @@
  */
 
 import * as fs from 'fs';
+import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import * as path from 'path';
 import { Configuration, RuleSetUseItem } from 'webpack';
-import { ExtraEntryPoint } from '../../builders/browser/schema';
+import { StyleElement } from '../../builders/browser/schema';
 import { SassWorkerImplementation } from '../../sass/sass-service';
-import { BuildBrowserFeatures } from '../../utils/build-browser-features';
 import { WebpackConfigOptions } from '../../utils/build-options';
 import {
   AnyComponentStyleBudgetChecker,
@@ -26,8 +26,8 @@ import {
   normalizeExtraEntryPoints,
 } from '../utils/helpers';
 
-function resolveGlobalStyles(
-  styleEntrypoints: ExtraEntryPoint[],
+export function resolveGlobalStyles(
+  styleEntrypoints: StyleElement[],
   root: string,
   preserveSymlinks: boolean,
 ): { entryPoints: Record<string, string[]>; noInjectNames: string[]; paths: string[] } {
@@ -72,7 +72,6 @@ function resolveGlobalStyles(
 
 // eslint-disable-next-line max-lines-per-function
 export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
-  const MiniCssExtractPlugin = require('mini-css-extract-plugin');
   const postcssImports = require('postcss-import');
   const postcssPresetEnv: typeof import('postcss-preset-env') = require('postcss-preset-env');
 
@@ -84,7 +83,7 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
   const cssSourceMap = buildOptions.sourceMap.styles;
 
   // Determine hashing format.
-  const hashFormat = getOutputHashFormat(buildOptions.outputHashing as string);
+  const hashFormat = getOutputHashFormat(buildOptions.outputHashing);
 
   // use includePaths from appConfig
   const includePaths =
@@ -112,7 +111,7 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
   extraPlugins.push({
     apply(compiler) {
       compiler.hooks.shutdown.tap('sass-worker', () => {
-        sassImplementation?.close();
+        sassImplementation.close();
       });
     },
   });
@@ -148,16 +147,12 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
       );
     }
     if (tailwindPackagePath) {
-      if (process.env['TAILWIND_MODE'] === undefined) {
-        process.env['TAILWIND_MODE'] = buildOptions.watch ? 'watch' : 'build';
-      }
       extraPostcssPlugins.push(require(tailwindPackagePath)({ config: tailwindConfigPath }));
     }
   }
 
-  const { supportedBrowsers } = new BuildBrowserFeatures(wco.projectRoot);
   const postcssPresetEnvPlugin = postcssPresetEnv({
-    browsers: supportedBrowsers,
+    browsers: buildOptions.supportedBrowsers,
     autoprefixer: true,
     stage: 3,
   });
@@ -172,7 +167,7 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
         : undefined,
       plugins: [
         postcssImports({
-          resolve: (url: string) => (url.startsWith('~') ? url.substr(1) : url),
+          resolve: (url: string) => (url.startsWith('~') ? url.slice(1) : url),
           load: (filename: string) => {
             return new Promise<string>((resolve, reject) => {
               loader.fs.readFile(filename, (err: Error, data: Buffer) => {
@@ -377,16 +372,17 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
           // Setup processing rules for global and component styles
           {
             oneOf: [
-              // Component styles are all styles except defined global styles
-              {
-                exclude: globalStylePaths,
-                use: componentStyleLoaders,
-                type: 'asset/source',
-              },
               // Global styles are only defined global styles
               {
-                include: globalStylePaths,
                 use: globalStyleLoaders,
+                include: globalStylePaths,
+                resourceQuery: { not: [/\?ngResource/] },
+              },
+              // Component styles are all styles except defined global styles
+              {
+                use: componentStyleLoaders,
+                type: 'asset/source',
+                resourceQuery: /\?ngResource/,
               },
             ],
           },
@@ -398,7 +394,7 @@ export function getStylesConfig(wco: WebpackConfigOptions): Configuration {
       minimizer: buildOptions.optimization.styles.minify
         ? [
             new CssOptimizerPlugin({
-              supportedBrowsers,
+              supportedBrowsers: buildOptions.supportedBrowsers,
             }),
           ]
         : undefined,

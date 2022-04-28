@@ -6,7 +6,7 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import { JsonValue, Path, basename, join, normalize, strings } from '@angular-devkit/core';
+import { JsonValue, Path, basename, join, normalize } from '@angular-devkit/core';
 import {
   Rule,
   SchematicContext,
@@ -17,13 +17,19 @@ import {
   chain,
   mergeWith,
   move,
+  strings,
   url,
 } from '@angular-devkit/schematics';
 import { NodePackageInstallTask } from '@angular-devkit/schematics/tasks';
 import * as ts from '../third_party/github.com/Microsoft/TypeScript/lib/typescript';
 import { findNode, getDecoratorMetadata } from '../utility/ast-utils';
 import { InsertChange } from '../utility/change';
-import { addPackageJsonDependency, getPackageJsonDependency } from '../utility/dependencies';
+import {
+  NodeDependencyType,
+  addPackageJsonDependency,
+  getPackageJsonDependency,
+} from '../utility/dependencies';
+import { latestVersions } from '../utility/latest-versions';
 import { findBootstrapModuleCall, findBootstrapModulePath } from '../utility/ng-ast-utils';
 import { relativePathToWorkspaceRoot } from '../utility/paths';
 import { targetBuildNotFoundError } from '../utility/project-targets';
@@ -93,12 +99,7 @@ function updateConfigFile(options: UniversalOptions, tsConfigDirectory: Path): R
 }
 
 function findBrowserModuleImport(host: Tree, modulePath: string): ts.Node {
-  const moduleBuffer = host.read(modulePath);
-  if (!moduleBuffer) {
-    throw new SchematicsException(`Module file (${modulePath}) not found`);
-  }
-  const moduleFileText = moduleBuffer.toString('utf-8');
-
+  const moduleFileText = host.readText(modulePath);
   const source = ts.createSourceFile(modulePath, moduleFileText, ts.ScriptTarget.Latest, true);
 
   const decoratorMetadata = getDecoratorMetadata(source, 'NgModule', '@angular/core')[0];
@@ -226,7 +227,11 @@ function addDependencies(): Rule {
     };
     addPackageJsonDependency(host, platformServerDep);
 
-    return host;
+    addPackageJsonDependency(host, {
+      type: NodeDependencyType.Dev,
+      name: '@types/node',
+      version: latestVersions['@types/node'],
+    });
   };
 }
 
